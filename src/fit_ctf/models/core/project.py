@@ -234,6 +234,7 @@ class ProjectManager(BaseManager[Project]):
 
         self.paths.project_path(name).mkdir(parents=True)
         self.paths.project_users(name).mkdir(parents=True)
+        self.paths.project_teams(name).mkdir(parents=True)
         self.paths.project_logs(name).mkdir(parents=True)
 
         prj = self.create_and_insert_doc(

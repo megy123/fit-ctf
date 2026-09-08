@@ -1,0 +1,47 @@
+Najprv urobiť tími s tým že sa bude dať vytvoriť teamové prostredie.
+Čize spojazdniť teamové prostredie. Potom pridať služby pre spravovávanie prostredia v reálnom čase teda pridávanie odoberanie flagov. Takisto scoreboard. Kotrola dostupnosti služby. 
+
+Treba systém pre submitovanie flagov v reálnom čase. A rovnako aj spôsob ako by mohli užívatelia sledovať leaderboard.
+
+Najprv urobiť klasické A&D potom tie 2 verzie obrana útok.
+
+Potom bude treba tímové infraštruktúry. Otázka je či na každej má byť viacero serverou a na každom serveri beží viacero služieb.
+
+Nezabudni vymyslieť nejaký šikovný antispam na tom serveri pre submitovanie flagov.
+
+A&D server / ProjectCluster
+  1. Submit API
+     - prijíma flagy od tímov
+     - validuje token tímu
+     - overí, či flag existuje, nie je vlastný, nie je expirovaný, nie je duplicitný
+
+  2. Leaderboard API
+     - vracia aktuálne skóre
+     - ideálne číta posledný vypočítaný score snapshot
+
+  3. Checker runner
+     - pravidelne kontroluje služby tímov
+     - overuje, či služba beží
+     - overuje, či sa dá vložený flag získať alebo overiť
+
+  4. Flag rotator / flag planter
+     - podľa tickov generuje nové flagy
+     - vkladá ich do služieb tímov
+     - nastavuje ich časovú platnosť
+
+  5. Tick scheduler
+     - spúšťa rotator, checker a scoring v správnom poradí
+
+  6. Score manager
+     - počíta attack/defense/SLA body
+     - ukladá leaderboard snapshoty
+
+
+- da sa aj mimo toho.
+
+
+Otázky: 
+
+Prekopať celú tú logiku pridávania flagov aby to išlo podľa tých tikov? Ano
+Predpokladám, že to treba mať modulárne pre N teamov ? Ano
+Má sa dať robiť viacero ctfiek naraz ? Ano

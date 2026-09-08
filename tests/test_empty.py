@@ -7,6 +7,10 @@ def test_empty(empty_data: FixtureData):
     assert len(ctf_app.prj_mgr.get_docs()) == 0
     assert len(ctf_app.user_mgr.get_docs()) == 0
     assert len(ctf_app.enroll_mgr.get_docs()) == 0
+    assert len(ctf_app.team_mgr.get_docs()) == 0
+    assert len(ctf_app.team_enroll_mgr.get_docs()) == 0
+    assert len(ctf_app.team_cluster_mgr.get_docs()) == 0
+    assert all(not manager.get_docs() for manager in vars(ctf_app.ad.managers).values())
 
 
 def test_file_structure(empty_data: FixtureData):

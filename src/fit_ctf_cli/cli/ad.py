@@ -1,0 +1,262 @@
+"""Operator CLI for full Attack & Defense competitions."""
+
+import time
+
+import click
+
+from fit_ctf.components.data_view import get_view
+from fit_ctf_cli.cli.utils import project_option, requires_database, team_option
+
+
+def _project(app, name):
+    return app.prj_mgr.get_project(name)
+
+
+def _team_enrollment(app, project, team_name):
+    return app.team_enroll_mgr.get_enrollment(app.team_mgr.get_team(team_name), project)
+
+
+@click.group(name="ad")
+@click.pass_context
+@requires_database
+def ad(ctx: click.Context):
+    """Manage full Attack & Defense competitions."""
+    ctx.obj = ctx.parent.obj  # pyright: ignore
+
+
+@ad.command("init")
+@project_option
+@click.option("--tick-seconds", default=120, type=int, show_default=True)
+@click.pass_context
+def init_ad(ctx, project_name, tick_seconds):
+    app = ctx.parent.obj["ctf_app"]
+    try:
+        config = app.ad.initialize_project(_project(app, project_name), tick_seconds=tick_seconds)
+    except Exception as exc:
+        raise click.ClickException(str(exc) or type(exc).__name__) from exc
+    click.echo(f"Attack & Defense initialized for `{project_name}` ({config.tick_seconds}s tick).")
+
+
+@ad.command("enroll-team")
+@project_option
+@team_option
+@click.pass_context
+def enroll_team(ctx, project_name, team_name):
+    app = ctx.parent.obj["ctf_app"]
+    try:
+        team = app.team_mgr.get_team(team_name)
+        enrollment, token = app.team_enroll_mgr.enroll(team, _project(app, project_name))
+    except Exception as exc:
+        raise click.ClickException(str(exc) or type(exc).__name__) from exc
+    click.echo(f"Team `{team_name}` enrolled (id={enrollment.id}).")
+    click.echo(f"Team token (shown once): {token}")
+
+
+@ad.command("rotate-token")
+@project_option
+@team_option
+@click.pass_context
+def rotate_token(ctx, project_name, team_name):
+    app = ctx.parent.obj["ctf_app"]
+    project = _project(app, project_name)
+    token = app.team_enroll_mgr.rotate_token(_team_enrollment(app, project, team_name))
+    click.echo(f"New team token (shown once): {token}")
+
+
+@ad.command("service-add")
+@project_option
+@click.option("--key", required=True)
+@click.option("--scenario", required=True)
+@click.option("--service", required=True)
+@click.option("--flag-path", default="runtime/flags/current.flag", show_default=True)
+@click.pass_context
+def service_add(ctx, project_name, key, scenario, service, flag_path):
+    app = ctx.parent.obj["ctf_app"]
+    try:
+        definition = app.ad.add_service_definition(
+            _project(app, project_name), key, scenario, service, flag_path
+        )
+    except Exception as exc:
+        raise click.ClickException(str(exc) or type(exc).__name__) from exc
+    click.echo(f"A&D service `{definition.key}` added.")
+
+
+@ad.command("service-import")
+@project_option
+@click.option("-s", "--scenario", required=True)
+@click.pass_context
+def service_import(ctx, project_name, scenario):
+    """Import A&D definitions from SCENARIO/ad.yaml."""
+    app = ctx.parent.obj["ctf_app"]
+    try:
+        definitions = app.ad.import_service_catalog(_project(app, project_name), scenario)
+    except Exception as exc:
+        raise click.ClickException(str(exc) or type(exc).__name__) from exc
+    click.echo(f"Imported {len(definitions)} A&D service definition(s).")
+
+
+@ad.command("service-ls")
+@project_option
+@click.pass_context
+def service_ls(ctx, project_name):
+    app = ctx.parent.obj["ctf_app"]
+    project = _project(app, project_name)
+    rows = app.ad.managers.definitions.get_docs(project_id=project.id, active=True)
+    get_view("tabulate").print_data(
+        ["Key", "Scenario", "Compose service", "Adapter"],
+        [[item.key, item.scenario_name, item.service_name, item.flag_adapter] for item in rows],
+    )
+
+
+@ad.command("start")
+@project_option
+@click.pass_context
+def start_ad(ctx, project_name):
+    app = ctx.parent.obj["ctf_app"]
+    try:
+        app.ad.start_project(_project(app, project_name))
+    except Exception as exc:
+        raise click.ClickException(str(exc) or type(exc).__name__) from exc
+    click.echo(f"Attack & Defense project `{project_name}` is running.")
+
+
+@ad.command("finish")
+@project_option
+@click.pass_context
+def finish_ad(ctx, project_name):
+    app = ctx.parent.obj["ctf_app"]
+    app.ad.finish_project(_project(app, project_name))
+    click.echo(f"Attack & Defense project `{project_name}` finished.")
+
+
+@ad.command("preflight")
+@project_option
+@click.pass_context
+def preflight(ctx, project_name):
+    app = ctx.parent.obj["ctf_app"]
+    app.ad.preflight(_project(app, project_name))
+    click.echo(f"Attack & Defense project `{project_name}` is ready.")
+
+
+@ad.command("pause")
+@project_option
+@click.pass_context
+def pause(ctx, project_name):
+    app = ctx.parent.obj["ctf_app"]
+    app.ad.pause_project(_project(app, project_name))
+    click.echo(f"Attack & Defense project `{project_name}` paused.")
+
+
+@ad.command("resume")
+@project_option
+@click.pass_context
+def resume(ctx, project_name):
+    app = ctx.parent.obj["ctf_app"]
+    app.ad.resume_project(_project(app, project_name))
+    click.echo(f"Attack & Defense project `{project_name}` resumed.")
+
+
+@ad.command("tick-open")
+@project_option
+@click.pass_context
+def tick_open(ctx, project_name):
+    app = ctx.parent.obj["ctf_app"]
+    tick = app.ad.open_tick(_project(app, project_name))
+    click.echo(f"Tick {tick.number} active; planted {tick.planted_instance_count} flags.")
+
+
+@ad.command("tick-close")
+@project_option
+@click.pass_context
+def tick_close(ctx, project_name):
+    app = ctx.parent.obj["ctf_app"]
+    tick = app.ad.close_tick(_project(app, project_name))
+    click.echo(f"Tick {tick.number} closed; checked {tick.checked_instance_count} services.")
+
+
+@ad.command("tick-advance")
+@project_option
+@click.pass_context
+def tick_advance(ctx, project_name):
+    app = ctx.parent.obj["ctf_app"]
+    tick = app.ad.advance(_project(app, project_name))
+    click.echo(f"Tick {tick.number} active.")
+
+
+@ad.command("submit")
+@project_option
+@team_option
+@click.option("--flag", required=True)
+@click.pass_context
+def submit(ctx, project_name, team_name, flag):
+    app = ctx.parent.obj["ctf_app"]
+    project = _project(app, project_name)
+    result = app.ad.submit(project, _team_enrollment(app, project, team_name), flag, source="cli")
+    click.echo(result.code)
+    if not result.accepted:
+        ctx.exit(1)
+
+
+@ad.command("scoreboard")
+@project_option
+@click.pass_context
+def scoreboard(ctx, project_name):
+    app = ctx.parent.obj["ctf_app"]
+    rows = app.ad.scoreboard(_project(app, project_name))
+    values = [
+        [row[key] for key in ("rank", "team", "tick", "attack", "defense", "sla", "total")]
+        for row in rows
+    ]
+    get_view("tabulate").print_data(
+        ["Rank", "Team", "Tick", "Attack", "Defense", "SLA", "Total"], values
+    )
+
+
+@ad.command("status")
+@project_option
+@click.pass_context
+def status(ctx, project_name):
+    app = ctx.parent.obj["ctf_app"]
+    project = _project(app, project_name)
+    config = app.ad.managers.config.get_for_project(project.id)
+    tick = app.ad.managers.ticks.latest(project.id)
+    latest = tick.number if tick else "-"
+    click.echo(f"state={config.state} mode={config.mode} latest_tick={latest}")
+
+
+@ad.command("serve")
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=8088, type=int, show_default=True)
+@click.pass_context
+def serve(ctx, host, port):
+    """Run the team submission and scoreboard HTTP API."""
+    from fit_ctf.ad.http_api import create_http_server
+
+    app = ctx.parent.obj["ctf_app"]
+    server = create_http_server(app, host, port)
+    click.echo(f"A&D API listening on http://{host}:{port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+@ad.command("worker")
+@click.option("--poll-seconds", default=1.0, type=float, show_default=True)
+@click.option("--once", is_flag=True, help="Process due projects once and exit.")
+@click.pass_context
+def worker(ctx, poll_seconds, once):
+    """Run the project-aware tick worker."""
+    app = ctx.parent.obj["ctf_app"]
+    while True:
+        try:
+            ticks = app.ad.run_due_projects()
+            for tick in ticks:
+                click.echo(f"project={tick.project_id} tick={tick.number} state={tick.state}")
+        except Exception as exc:
+            app.logger.warning(str(exc), logger_name="ad_worker")
+        if once:
+            return
+        time.sleep(max(poll_seconds, 0.1))

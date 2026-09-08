@@ -27,6 +27,7 @@ services:
 
 volumes:
   mongo_data:
+    name: "${DB_VOLUME_NAME:-ctf_backend_mongo_data}"
 
 networks:
   fit-ctf-net: {}

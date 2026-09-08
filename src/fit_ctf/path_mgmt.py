@@ -5,6 +5,7 @@ from fit_ctf.components.types import PathDict
 
 if TYPE_CHECKING:
     import fit_ctf.models.core.project as _prj
+    import fit_ctf.models.core.team as _team
     import fit_ctf.models.core.user as _user
 
 
@@ -40,6 +41,9 @@ class PathManagement:
     def project_users(self, project_or_name: "str | _prj.Project") -> Path:
         return self.project_path(project_or_name) / "users"
 
+    def project_teams(self, project_or_name: "str | _prj.Project") -> Path:
+        return self.project_path(project_or_name) / "teams"
+
     def project_logs(self, project_or_name: "str | _prj.Project") -> Path:
         return self.project_path(project_or_name) / "logs"
 
@@ -53,6 +57,9 @@ class PathManagement:
 
     def enrolled_user_path(self, user: "_user.User", project: "_prj.Project") -> Path:
         return self.project_users(project) / user.username
+
+    def enrolled_team_path(self, team: "_team.Team", project: "_prj.Project") -> Path:
+        return self.project_teams(project) / team.name
 
     # def enrolled_user_secrets(
     #     self, user: "_user.User", project: "_prj.Project"

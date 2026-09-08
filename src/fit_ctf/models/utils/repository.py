@@ -14,6 +14,8 @@ from fit_ctf.models.utils.exceptions import (
 if TYPE_CHECKING:
     from fit_ctf.models.core.enrollment import Enrollment
     from fit_ctf.models.core.project import Project
+    from fit_ctf.models.core.team import Team
+    from fit_ctf.models.core.team_enrollment import TeamEnrollment
     from fit_ctf.models.core.user import User
 
 
@@ -167,3 +169,19 @@ class EntityRepository:
         if not enrollment:
             raise EnrollmentNotExistException(f"Enrollment {enrollment_id} not found.")
         return Enrollment(**enrollment)
+
+    def get_team_by_id(self, team_id: ObjectId) -> "Team":
+        from fit_ctf.models.core.team import Team, TeamNotFoundError
+
+        raw = self._db["team"].find_one({"_id": team_id})
+        if not raw:
+            raise TeamNotFoundError(f"Team {team_id} does not exist.")
+        return Team(**raw)
+
+    def get_team_enrollment_by_id(self, enrollment_id: ObjectId) -> "TeamEnrollment":
+        from fit_ctf.models.core.team_enrollment import TeamEnrollment, TeamNotEnrolledError
+
+        raw = self._db["team_enrollment"].find_one({"_id": enrollment_id})
+        if not raw:
+            raise TeamNotEnrolledError(f"Team enrollment {enrollment_id} does not exist.")
+        return TeamEnrollment(**raw)

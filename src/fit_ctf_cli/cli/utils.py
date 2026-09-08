@@ -14,6 +14,8 @@ project_option = click.option(
 
 user_option = click.option("-u", "--username", required=True, type=str, help="Account username.")
 
+team_option = click.option("-t", "--team-name", required=True, type=str, help="Team name.")
+
 service_name_option = click.option("-sn", "--service-name", required=True, help="Service's name.")
 
 module_name_option = click.option(

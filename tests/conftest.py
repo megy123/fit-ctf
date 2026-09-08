@@ -65,6 +65,11 @@ def empty_data(
     """
 
     def teardown():
+        for manager in vars(ctf_app.ad.managers).values():
+            manager.remove_docs_by_filter()
+        ctf_app.team_cluster_mgr.remove_docs_by_filter()
+        ctf_app.team_enroll_mgr.remove_docs_by_filter()
+        ctf_app.team_mgr.remove_docs_by_filter()
         ctf_app.user_cluster_mgr.remove_docs_by_filter()
         ctf_app.project_cluster_mgr.remove_docs_by_filter()
         ctf_app.enroll_mgr.remove_docs_by_filter()
@@ -91,6 +96,11 @@ def empty_data(
     # init testing env and clear database (just in case)
     ctf_app = CTFApp(env_info, paths, shared_mongo_client)
 
+    for manager in vars(ctf_app.ad.managers).values():
+        manager.remove_docs_by_filter()
+    ctf_app.team_cluster_mgr.remove_docs_by_filter()
+    ctf_app.team_enroll_mgr.remove_docs_by_filter()
+    ctf_app.team_mgr.remove_docs_by_filter()
     ctf_app.user_cluster_mgr.remove_docs_by_filter()
     ctf_app.project_cluster_mgr.remove_docs_by_filter()
     ctf_app.enroll_mgr.remove_docs_by_filter()

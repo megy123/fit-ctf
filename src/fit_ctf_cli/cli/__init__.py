@@ -25,6 +25,9 @@ class LazyGroup(click.Group):
             "user-progress": ("fit_ctf_cli.cli.user_progress", "user_progress"),
             "scenario": ("fit_ctf_cli.cli.scenario", "scenario"),
             "cluster": ("fit_ctf_cli.cli.user_cluster", "user_cluster"),
+            "team": ("fit_ctf_cli.cli.team", "team"),
+            "team-cluster": ("fit_ctf_cli.cli.team_cluster", "team_cluster"),
+            "ad": ("fit_ctf_cli.cli.ad", "ad"),
         }
 
     def list_commands(self, ctx: click.Context):

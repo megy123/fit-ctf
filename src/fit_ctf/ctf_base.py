@@ -1,3 +1,4 @@
+import os
 from typing import TYPE_CHECKING
 
 import pymongo
@@ -35,14 +36,40 @@ class CTFBase:
 
     def _init_managers(self):
         """Initialize all managers in linear order (no circular dependencies)."""
+        from fit_ctf.models.ad.managers import (
+            ADCheckResultManager,
+            ADFlagManager,
+            ADManagers,
+            ADProjectConfigManager,
+            ADScoreSnapshotManager,
+            ADServiceDefinitionManager,
+            ADServiceInstanceManager,
+            ADSubmissionManager,
+            ADTickManager,
+            ensure_ad_indexes,
+        )
+        from fit_ctf.models.ad.models import (
+            ADFlag,
+            ADFlagSubmission,
+            ADProjectConfig,
+            ADScoreSnapshot,
+            ADServiceCheckResult,
+            ADServiceDefinition,
+            ADServiceInstance,
+            ADTick,
+        )
         from fit_ctf.models.core.enrollment import Enrollment, EnrollmentManager
         from fit_ctf.models.core.project import Project, ProjectManager
+        from fit_ctf.models.core.team import Team, TeamManager
+        from fit_ctf.models.core.team_enrollment import TeamEnrollment, TeamEnrollmentManager
         from fit_ctf.models.core.user import User, UserManager
         from fit_ctf.models.infra import (
             ModuleManager,
             ProjectCluster,
             ProjectClusterManager,
             ScenarioManager,
+            TeamCluster,
+            TeamClusterManager,
             UserCluster,
             UserClusterManager,
         )
@@ -64,6 +91,17 @@ class CTFBase:
             coll=self.ctf_db["project_cluster"],
             model_cls=ProjectCluster,
             repo=self._repo,
+            c_client=self._c_client,
+            paths=self._path_mgmt,
+            logger=self._logger,
+        )
+
+        self._team_cluster_mgr: "infra.TeamClusterManager" = TeamClusterManager(
+            db=self.ctf_db,
+            coll=self.ctf_db["team_cluster"],
+            model_cls=TeamCluster,
+            repo=self._repo,
+            project_cluster_mgr=self._project_cluster_mgr,
             c_client=self._c_client,
             paths=self._path_mgmt,
             logger=self._logger,
@@ -104,6 +142,26 @@ class CTFBase:
             logger=self._logger,
         )
 
+        self._team_mgr: "core.TeamManager" = TeamManager(
+            db=self.ctf_db,
+            coll=self.ctf_db["team"],
+            model_cls=Team,
+            c_client=self._c_client,
+            paths=self._path_mgmt,
+            logger=self._logger,
+        )
+
+        self._team_enroll_mgr: "core.TeamEnrollmentManager" = TeamEnrollmentManager(
+            db=self.ctf_db,
+            coll=self.ctf_db["team_enrollment"],
+            model_cls=TeamEnrollment,
+            repo=self._repo,
+            team_cluster_mgr=self._team_cluster_mgr,
+            c_client=self._c_client,
+            paths=self._path_mgmt,
+            logger=self._logger,
+        )
+
         # Top-level manager
         self._enroll_mgr: "core.EnrollmentManager" = EnrollmentManager(
             db=self.ctf_db,
@@ -116,6 +174,34 @@ class CTFBase:
             paths=self._path_mgmt,
             logger=self._logger,
         )
+
+        def manager(cls, collection, model):
+            return cls(
+                db=self.ctf_db,
+                coll=self.ctf_db[collection],
+                model_cls=model,
+                c_client=self._c_client,
+                paths=self._path_mgmt,
+                logger=self._logger,
+            )
+
+        ensure_ad_indexes(self.ctf_db)
+        self._ad_managers = ADManagers(
+            config=manager(ADProjectConfigManager, "ad_project_config", ADProjectConfig),
+            definitions=manager(
+                ADServiceDefinitionManager, "ad_service_definition", ADServiceDefinition
+            ),
+            instances=manager(ADServiceInstanceManager, "ad_service_instance", ADServiceInstance),
+            ticks=manager(ADTickManager, "ad_tick", ADTick),
+            flags=manager(ADFlagManager, "ad_flag", ADFlag),
+            submissions=manager(ADSubmissionManager, "ad_flag_submission", ADFlagSubmission),
+            checks=manager(ADCheckResultManager, "ad_service_check_result", ADServiceCheckResult),
+            scores=manager(ADScoreSnapshotManager, "ad_score_snapshot", ADScoreSnapshot),
+        )
+        from fit_ctf.ad.service import AttackDefenseService
+
+        flag_secret = os.getenv("AD_FLAG_SECRET", self._env_info["db_password"])
+        self._ad = AttackDefenseService(self, self._ad_managers, flag_secret)
 
         # NO two-phase wiring - clean linear initialization!
 
@@ -148,6 +234,14 @@ class CTFBase:
         return self._user_mgr
 
     @property
+    def team_mgr(self) -> "core.TeamManager":
+        return self._team_mgr
+
+    @property
+    def team_enroll_mgr(self) -> "core.TeamEnrollmentManager":
+        return self._team_enroll_mgr
+
+    @property
     def enroll_mgr(self) -> "core.EnrollmentManager":
         """Returns an enrollment manager.
 
@@ -170,6 +264,10 @@ class CTFBase:
         return self._user_cluster_mgr
 
     @property
+    def team_cluster_mgr(self) -> "infra.TeamClusterManager":
+        return self._team_cluster_mgr
+
+    @property
     def project_cluster_mgr(self) -> "infra.ProjectClusterManager":
         return self._project_cluster_mgr
 
@@ -188,3 +286,7 @@ class CTFBase:
     @property
     def paths(self) -> PathManagement:
         return self._path_mgmt
+
+    @property
+    def ad(self):
+        return self._ad

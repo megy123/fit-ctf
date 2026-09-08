@@ -1,0 +1,51 @@
+$id: "https://github.com/hungdojan/fit-ctf/schemas/v1/ad.yaml"
+$schema: "https://json-schema.org/draft/2020-12/schema"
+type: object
+title: Attack and Defense scenario metadata
+additionalProperties: false
+required: [version, services]
+properties:
+  version:
+    const: 1
+  services:
+    type: object
+    minProperties: 1
+    propertyNames:
+      pattern: "^[a-z0-9_]+$"
+    additionalProperties:
+      type: object
+      additionalProperties: false
+      required: [compose_service, flag]
+      properties:
+        display_name:
+          type: string
+        compose_service:
+          type: string
+          pattern: "^[a-zA-Z0-9_.-]+$"
+        supported_modes:
+          type: array
+          uniqueItems: true
+          items:
+            enum: [attack_defense, attack_only, defense_only]
+        checker:
+          type: object
+          additionalProperties: true
+          properties:
+            adapter:
+              type: string
+        flag:
+          type: object
+          additionalProperties: false
+          required: [adapter]
+          properties:
+            adapter:
+              type: string
+            relative_path:
+              type: string
+            directory_mount:
+              type: string
+            filename:
+              type: string
+        scoring_weight:
+          type: number
+          exclusiveMinimum: 0

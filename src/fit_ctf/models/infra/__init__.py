@@ -3,6 +3,7 @@
 from fit_ctf.models.infra.module_manager import ModuleManager
 from fit_ctf.models.infra.project_cluster import ProjectCluster, ProjectClusterManager
 from fit_ctf.models.infra.scenario_manager import ScenarioManager
+from fit_ctf.models.infra.team_cluster import TeamCluster, TeamClusterManager
 from fit_ctf.models.infra.user_cluster import UserCluster, UserClusterManager
 
 __all__ = [
@@ -12,4 +13,6 @@ __all__ = [
     "UserCluster",
     "UserClusterManager",
     "ScenarioManager",
+    "TeamCluster",
+    "TeamClusterManager",
 ]
