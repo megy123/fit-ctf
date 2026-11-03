@@ -2,7 +2,9 @@
 
 import pathlib
 import shutil
-from typing import TYPE_CHECKING, Any, Self, cast, overload
+from typing import TYPE_CHECKING, Any, cast, overload
+
+from typing_extensions import Self
 
 from bson import DBRef, ObjectId
 from pymongo.collection import Collection
@@ -234,10 +236,32 @@ class UserClusterManager(ClusterManagerMixin[UserCluster]):
             user, project = self.get_user_and_project(cluster_or_project_user.enrollment_id.id)
         else:
             user, project = cluster_or_project_user
+        if self.is_ad_isolated(project):
+            team_enrollment = self._db["team_enrollment"].find_one(
+                {
+                    "project_id.$id": project.id,
+                    "member_ids_snapshot": user.id,
+                    "state": "active",
+                }
+            )
+            if not team_enrollment:
+                raise UserNotEnrolledToProjectException(
+                    f"User `{user.username}` is not assigned to an active A&D team."
+                )
+            team_id = team_enrollment["team_id"].id
+            team = self._repo.get_team_by_id(team_id)
+            team_network = f"{project.name}_{team.name}_private_net"
+            return {"shared": team_network, "private": team_network, "mode": "ad_isolated"}
         return {
             "shared": f"{project.name}_shared_net",
             "private": f"{project.name}_{user.username}_private_net",
         }
+
+    def is_ad_isolated(self, project: "project.Project") -> bool:
+        """Return whether this project uses the isolated A&D topology."""
+        return self._db["ad_project_config"].find_one(
+            {"project_id": project.id, "active": True}, {"_id": 1}
+        ) is not None
 
     def _scenario_global_and_destination(
         self, cluster: UserCluster, scenario_name: str
@@ -494,7 +518,10 @@ class UserClusterManager(ClusterManagerMixin[UserCluster]):
         :return: True if cluster is running
         :rtype: bool
         """
-        return len(await self.c_client.compose_ps(self.get_compose_files(cluster))) > 0
+        states = await self.c_client.compose_states(self.get_compose_files(cluster))
+        return bool(states) and all(
+            str(item["state"]).lower() in {"running", "up"} for item in states
+        )
 
     async def restart_cluster(
         self,

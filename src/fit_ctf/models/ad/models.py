@@ -27,6 +27,7 @@ class CompetitionMode(str, Enum):
 class ADProjectConfig(Base):
     project_id: ObjectId
     mode: CompetitionMode = CompetitionMode.ATTACK_DEFENSE
+    network_topology: str = "isolated_router_v1"
     state: str = "draft"
     tick_seconds: int = 120
     flag_ttl_ticks: int = 2

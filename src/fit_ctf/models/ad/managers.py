@@ -34,6 +34,7 @@ class ADProjectConfigManager(BaseManager[ADProjectConfig]):
         return self.create_and_insert_doc(
             project_id=project_id,
             mode=CompetitionMode.ATTACK_DEFENSE,
+            network_topology="isolated_router_v1",
             tick_seconds=tick_seconds,
         )
 

@@ -7,6 +7,7 @@ from typing import Any
 
 import fit_ctf.components.container_client.container_client_interface as c_client
 from fit_ctf.components.types import ErrorCode, HealthCheckDict, TaskSuccess
+from yaml import safe_load
 
 
 class PodmanClient(c_client.ContainerClientInterface):
@@ -73,6 +74,89 @@ class PodmanClient(c_client.ContainerClientInterface):
         await self._process_logging(proc, logger_name=logger_name, to_stdout=to_stdout)
 
         await proc.wait()
+        if proc.returncode == 0:
+            # podman-compose 1.6 can leave services only on its default network
+            # when external networks are declared. Explicitly attach every
+            # compose container to the networks declared by the rendered files.
+            services = []
+            for path in files:
+                document = safe_load(path.read_text(encoding="utf-8")) or {}
+                project_name = str(document.get("name", ""))
+                for service_name, service in document.get("services", {}).items():
+                    services.append((project_name, service_name, service))
+            list_proc = await asyncio.create_subprocess_exec(
+                "podman",
+                "ps",
+                "-a",
+                "--format",
+                "{{.Names}}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            listed, _ = await list_proc.communicate()
+            containers = [line.strip() for line in listed.decode().splitlines() if line.strip()]
+            for project_name, service_name, service in services:
+                prefix = f"{project_name}_"
+                # podman-compose uses the first compose file's project name
+                # for all merged files, so the scenario directory is not
+                # reliable here. Match the actual service component instead.
+                matching = [
+                    name
+                    for name in containers
+                    if name.startswith(prefix) and f"_{service_name}_" in name
+                ]
+                for container in matching:
+                    for network, network_config in (service.get("networks") or {}).items():
+                        disconnect = await asyncio.create_subprocess_exec(
+                            "podman", "network", "disconnect", "--force", network, container,
+                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                        )
+                        await disconnect.communicate()
+                        args = ["podman", "network", "connect"]
+                        aliases = []
+                        if isinstance(network_config, dict):
+                            aliases.extend(network_config.get("aliases", []))
+                        if service.get("hostname"):
+                            aliases.append(service["hostname"])
+                        for alias in dict.fromkeys(aliases):
+                            args.extend(["--alias", str(alias)])
+                        args.extend([network, container])
+                        connect = await asyncio.create_subprocess_exec(
+                            *args,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        await connect.communicate()
+                    # A network connected after container creation does not
+                    # update resolv.conf. Refresh it from the shared-network
+                    # gateway once all interfaces are present.
+                    refresh_dns = await asyncio.create_subprocess_exec(
+                        "podman",
+                        "exec",
+                        container,
+                        "sh",
+                        "-c",
+                        "dns=$(ip -4 route show default dev eth1 2>/dev/null | awk 'NR == 1 {print $3}'); "
+                        "if [ -n \"$dns\" ]; then printf 'nameserver %s\\n' \"$dns\" > /etc/resolv.conf; fi",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    await refresh_dns.communicate()
+                    # podman-compose creates merged services on its default
+                    # network even when the compose file declares only
+                    # external A&D networks. Remove that escape route after
+                    # the intended networks are attached.
+                    disconnect_default = await asyncio.create_subprocess_exec(
+                        "podman",
+                        "network",
+                        "disconnect",
+                        "--force",
+                        "podman",
+                        container,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    await disconnect_default.communicate()
         return proc.returncode if proc.returncode is not None else 255
 
     async def compose_down(
@@ -227,7 +311,12 @@ class PodmanClient(c_client.ContainerClientInterface):
             cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
         )
         stdout, _ = await proc.communicate()
-        data = json.loads(stdout)
+        if not stdout.strip():
+            return []
+        try:
+            data = json.loads(stdout)
+        except json.JSONDecodeError:
+            return []
         return [
             {
                 "name": service["Names"][0],

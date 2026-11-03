@@ -10,10 +10,17 @@ services:
       dockerfile: Containerfile
     image: fit-ctf/{{ login_node_module|default("ssh_ubi") }}:latest
     restart: unless-stopped
-    # use shared or private mode
+    # A&D login nodes are placed only in their team's private network.
+    {% if network_map__mode|default("classic") == "ad_isolated" %}
+    cap_add:
+      - NET_ADMIN
+    networks:
+      {{ network_map__private }}:
+    {% else %}
     networks:
       {{ network_map__shared }}:
       {{ network_map__private }}:
+    {% endif %}
     # Host bind from enrollment; students use forwarded_port when it differs (NAT / edge)
     ports:
       - "{{ container_port }}:22"
@@ -26,8 +33,14 @@ services:
       - "{{ login_node__volume_map__shadow }}:/etc/shadow"
 
 # set networks as external
+{% if network_map__mode|default("classic") == "ad_isolated" %}
+networks:
+  {{ network_map__private }}:
+    external: true
+{% else %}
 networks:
   {{ network_map__shared }}:
     external: true
   {{ network_map__private }}:
     external: true
+{% endif %}

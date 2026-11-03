@@ -309,6 +309,16 @@ class ProjectManager(BaseManager[Project]):
         """
         prj = self.get_project(project_or_name)
 
+        topology = self._db["ad_topology"].find_one({"project_id": prj.id})
+        if topology and topology.get("plan"):
+            compose = self.paths.project_path(prj) / "topology" / "compose.yaml"
+            code, _ = await self.c_client.compose_down(prj.name, [compose])
+            if code:
+                raise RuntimeError("Cannot disable project: stopping its A&D topology failed")
+            self._db["ad_topology"].update_one(
+                {"project_id": prj.id}, {"$set": {"running": False}}
+            )
+
         # Stop project cluster if exists
         try:
             cluster = self._project_cluster_mgr.get_cluster(prj)
@@ -352,6 +362,7 @@ class ProjectManager(BaseManager[Project]):
             shutil.rmtree(path)
 
         self.remove_doc_by_id(prj.id)
+        self._db["ad_topology"].delete_one({"project_id": prj.id})
         n_map = self._project_cluster_mgr.get_network_map(prj)
         for n_name in n_map.values():
             self.c_client.rm_network(prj.name, str(n_name))

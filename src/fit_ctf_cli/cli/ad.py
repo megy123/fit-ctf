@@ -1,6 +1,9 @@
 """Operator CLI for full Attack & Defense competitions."""
 
+import asyncio
+import json
 import time
+from pathlib import Path
 
 import click
 
@@ -22,6 +25,76 @@ def _team_enrollment(app, project, team_name):
 def ad(ctx: click.Context):
     """Manage full Attack & Defense competitions."""
     ctx.obj = ctx.parent.obj  # pyright: ignore
+
+
+@ad.group("topology")
+def topology():
+    """Define and deploy general networks and replicated team clusters."""
+
+
+@topology.command("load")
+@project_option
+@click.option("-f", "--file", required=True, type=click.Path(exists=True, path_type=Path))
+@click.pass_context
+def topology_load(ctx, project_name, file):
+    import yaml
+
+    app = ctx.find_object(dict)["ctf_app"]
+    try:
+        app.topology.load(
+            _project(app, project_name), yaml.safe_load(file.read_text(encoding="utf-8"))
+        )
+    except (ValueError, OSError, yaml.YAMLError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo("Topology definition saved. Run topology compile to instantiate enrolled teams.")
+
+
+@topology.command("compile")
+@project_option
+@click.pass_context
+def topology_compile(ctx, project_name):
+    app = ctx.find_object(dict)["ctf_app"]
+    try:
+        plan = app.topology.compile(_project(app, project_name))
+    except (ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(
+        f"Compiled {len(plan['nodes'])} nodes, {len(plan['networks'])} networks, "
+        f"{len(plan['links'])} links for {len(plan['teams'])} teams."
+    )
+
+
+@topology.command("plan")
+@project_option
+@click.pass_context
+def topology_plan(ctx, project_name):
+    app = ctx.find_object(dict)["ctf_app"]
+    try:
+        click.echo(json.dumps(app.topology.plan(_project(app, project_name)), indent=2))
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+def _topology_action(action):
+    @topology.command(action)
+    @project_option
+    @click.option("-v", "--verbose", is_flag=True)
+    @click.pass_context
+    def run(ctx, project_name, verbose):
+        app = ctx.find_object(dict)["ctf_app"]
+        try:
+            result = asyncio.run(app.topology.run(_project(app, project_name), action, verbose))
+        except (ValueError, RuntimeError, OSError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        click.echo(
+            json.dumps(result, default=str) if action == "status" else f"Topology {action}: OK"
+        )
+
+    return run
+
+
+for _action in ("build", "start", "stop", "status"):
+    _topology_action(_action)
 
 
 @ad.command("init")

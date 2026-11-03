@@ -77,7 +77,16 @@ class AttackDefenseService:
         self.worker_id = str(uuid.uuid4())
 
     def initialize_project(self, project: "Project", *, tick_seconds: int = 120):
-        return self.managers.config.initialize(project.id, tick_seconds=tick_seconds)
+        config = self.managers.config.initialize(project.id, tick_seconds=tick_seconds)
+        # A&D owns its topology. The generic project cluster creates these
+        # legacy networks before the A&D mode is selected; remove them so an
+        # isolated competition has no shared project network.
+        for network in (
+            f"{project.name}_shared_net",
+            f"{project.name}_operational_net",
+        ):
+            self.app.c_client.rm_network(project.name, network)
+        return config
 
     def _config(self, project: "Project"):
         return self.managers.config.get_for_project(project.id)

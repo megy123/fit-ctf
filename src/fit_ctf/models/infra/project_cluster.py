@@ -2,7 +2,9 @@
 
 import pathlib
 import shutil
-from typing import TYPE_CHECKING, Self, cast, overload
+from typing import TYPE_CHECKING, cast, overload
+
+from typing_extensions import Self
 
 from bson import DBRef
 from pymongo.collection import Collection
@@ -374,7 +376,13 @@ class ProjectClusterManager(ClusterManagerMixin[ProjectCluster]):
         :return: True if cluster is running
         :rtype: bool
         """
-        return len(await self.c_client.compose_ps(self.get_compose_files(cluster))) > 0
+        compose_files = self.get_compose_files(cluster)
+        if not compose_files:
+            return False
+        states = await self.c_client.compose_states(compose_files)
+        return bool(states) and all(
+            str(item["state"]).lower() in {"running", "up"} for item in states
+        )
 
     async def restart_cluster(self, cluster: ProjectCluster, *, verbose: bool = False) -> ErrorCode:
         """Restart a project cluster.

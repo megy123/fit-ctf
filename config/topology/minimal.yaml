@@ -1,0 +1,18 @@
+version: 1
+# Omitted general => exactly one router named router.
+team_clusters:
+  web:
+    networks: [lan]
+    nodes:
+      gateway: {kind: router, networks: [lan]}
+      server:
+        kind: server
+        networks: [lan]
+        services:
+          http:
+            image: python:3.12-alpine
+            command: [python, -m, http.server, '8080', --directory, /flags]
+            volumes: ['{cluster_dir}/runtime/flags:/flags:ro']
+links:
+  uplink:
+    team: {cluster: web, node: gateway}

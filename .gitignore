@@ -164,3 +164,6 @@ demo/
 _build/
 .vscode/
 .admin_env
+
+# Temporary ignore
+docs/attack-defense/*

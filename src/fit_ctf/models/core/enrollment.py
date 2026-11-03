@@ -31,6 +31,7 @@ from fit_ctf.models.utils.exceptions import (
     UserEnrolledToProjectException,
     UserNotEnrolledToProjectException,
     UserNotExistsException,
+    UserClusterNotExistException,
 )
 from fit_ctf.models.utils.mongo_queries import MongoQueries
 from fit_ctf.models.utils.repository import EntityRepository
@@ -336,8 +337,9 @@ class EnrollmentManager(BaseManager[Enrollment], UserProgressManager):
                     enrollment,
                 ).build()
             )
-        n_map = self._user_cluster_mgr.get_network_map((user, project))
-        self.c_client.create_networks(project.name, [n_map["private"]])
+        if not self._user_cluster_mgr.is_ad_isolated(project):
+            n_map = self._user_cluster_mgr.get_network_map((user, project))
+            self.c_client.create_networks(project.name, [n_map["private"]])
 
         return enrollment
 
@@ -416,8 +418,9 @@ class EnrollmentManager(BaseManager[Enrollment], UserProgressManager):
                         enrollment,
                     ).build()
                 )
-            n_map = self._user_cluster_mgr.get_network_map((user, project))
-            self.c_client.create_networks(project.name, [n_map["private"]])
+            if not self._user_cluster_mgr.is_ad_isolated(project):
+                n_map = self._user_cluster_mgr.get_network_map((user, project))
+                self.c_client.create_networks(project.name, [n_map["private"]])
 
         return enrollments
 
@@ -749,10 +752,22 @@ class EnrollmentManager(BaseManager[Enrollment], UserProgressManager):
         if enrollment.active:
             raise UserEnrolledToProjectException("Cannot flush data when the enrollment is active.")
 
-        # Get and delete cluster (this will clean up scenarios)
-        cluster = self._user_cluster_mgr.get_cluster(enrollment)
-        n_map = self._user_cluster_mgr.get_network_map(cluster)
-        self.c_client.rm_network(project.name, n_map["private"])
+        # Get and delete cluster (this will clean up scenarios). A failed
+        # cluster creation may leave an enrollment without a cluster; cleanup
+        # must still be able to remove that partial enrollment.
+        try:
+            cluster = self._user_cluster_mgr.get_cluster(enrollment)
+        except UserClusterNotExistException:
+            cluster = None
+        if cluster is None:
+            enrolled_user_path = self.paths.enrolled_user_path(user, project)
+            if enrolled_user_path.exists():
+                shutil.rmtree(enrolled_user_path)
+            self.remove_doc_by_id(enrollment.id)
+            return
+        if not self._user_cluster_mgr.is_ad_isolated(project):
+            n_map = self._user_cluster_mgr.get_network_map(cluster)
+            self.c_client.rm_network(project.name, n_map["private"])
 
         await self._user_cluster_mgr.delete_cluster(cluster, self)
 

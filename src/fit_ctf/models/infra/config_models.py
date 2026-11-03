@@ -1,6 +1,8 @@
 """Configuration models for scenarios and services."""
 
-from typing import Any, Self
+from typing import Any
+
+from typing_extensions import Self
 
 from pydantic import BaseModel, Field
 

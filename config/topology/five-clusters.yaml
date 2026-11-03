@@ -1,0 +1,44 @@
+# This template is replicated for EVERY enrolled team.
+version: 1
+address_pool: 10.160.0.0/12
+general:
+  networks: [backbone]
+  nodes:
+    west: {kind: router, networks: [backbone]}
+    east: {kind: router, networks: [backbone]}
+team_clusters:
+  frontend: &cluster
+    networks: [lan]
+    nodes:
+      gateway: {kind: router, networks: [lan]}
+      app:
+        kind: server
+        networks: [lan]
+        services:
+          web:
+            image: python:3.12-alpine
+            command: [python, -m, http.server, '8080', --directory, /flags]
+            environment: {TEAM: '{team}'}
+            volumes: ['{cluster_dir}/runtime/flags:/flags:ro']
+          metrics:
+            image: python:3.12-alpine
+            command: [python, -m, http.server, '9090']
+  database: *cluster
+  monitoring: *cluster
+  mail: *cluster
+  access: *cluster
+links:
+  frontend_primary:
+    team: {cluster: frontend, node: gateway}
+    main: west
+  frontend_backup:
+    team: {cluster: frontend, node: gateway}
+    main: east
+  database_uplink:
+    team: {cluster: database, node: gateway}
+  monitoring_uplink:
+    team: {cluster: monitoring, node: gateway}
+  mail_uplink:
+    team: {cluster: mail, node: gateway}
+  access_uplink:
+    team: {cluster: access, node: gateway}

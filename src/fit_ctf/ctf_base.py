@@ -290,3 +290,11 @@ class CTFBase:
     @property
     def ad(self):
         return self._ad
+
+    @property
+    def topology(self):
+        from fit_ctf.ad.topology import TopologyManager
+
+        if not hasattr(self, "_topology"):
+            self._topology = TopologyManager(self)
+        return self._topology

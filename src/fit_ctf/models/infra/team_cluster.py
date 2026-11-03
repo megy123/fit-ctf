@@ -70,9 +70,13 @@ class TeamClusterManager(ClusterManagerMixin[TeamCluster]):
             team, project, _ = self.get_team_project_enrollment(cluster_or_pair)
         else:
             team, project = cluster_or_pair
+        isolated = self._db["ad_project_config"].find_one(
+            {"project_id": project.id, "active": True}, {"_id": 1}
+        ) is not None
         return {
             "shared": f"{project.name}_shared_net",
             "private": f"{project.name}_{team.name}_private_net",
+            "mode": "ad_isolated" if isolated else "classic",
         }
 
     def _scenario_global_and_destination(
@@ -142,7 +146,10 @@ class TeamClusterManager(ClusterManagerMixin[TeamCluster]):
         )
 
     async def cluster_is_running(self, cluster: TeamCluster) -> bool:
-        return bool(await self.c_client.compose_ps(self.get_compose_files(cluster)))
+        states = await self.c_client.compose_states(self.get_compose_files(cluster))
+        return bool(states) and all(
+            str(item["state"]).lower() in {"running", "up"} for item in states
+        )
 
     async def cluster_health_check(self, cluster: TeamCluster) -> list[HealthCheckDict]:
         return await self.c_client.compose_states(self.get_compose_files(cluster))

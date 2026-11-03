@@ -1,7 +1,9 @@
 import pathlib
 from datetime import datetime
 from enum import Enum
-from typing import NotRequired, TypeAlias, TypedDict
+from typing import TypeAlias, TypedDict
+
+from typing_extensions import NotRequired
 
 ErrorCode: TypeAlias = int
 TaskSuccess: TypeAlias = bool
@@ -108,6 +110,7 @@ class LeaderBoardItem(TypedDict):
 class UserNetworkMap(TypedDict):
     shared: str
     private: str
+    mode: NotRequired[str]
 
 
 class ProjectNetworkMap(TypedDict):
