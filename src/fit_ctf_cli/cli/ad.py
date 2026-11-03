@@ -97,6 +97,39 @@ for _action in ("build", "start", "stop", "status"):
     _topology_action(_action)
 
 
+@ad.group("logging")
+def audit_logging():
+    """Independently enable or disable project JSON audit categories."""
+
+
+def _logging_switch(category):
+    @audit_logging.command(category)
+    @project_option
+    @click.option(
+        "--enabled/--disabled",
+        default=None,
+        help="Enable or disable this category; omit to show its state.",
+    )
+    @click.pass_context
+    def toggle(ctx, project_name, enabled):
+        app = ctx.find_object(dict)["ctf_app"]
+        project = _project(app, project_name)
+        log = app.audit.log(project)
+        if enabled is not None:
+            try:
+                log = app.audit.configure(project, category, enabled)
+            except (OSError, RuntimeError) as exc:
+                raise click.ClickException(str(exc)) from exc
+        state = log.settings()["enabled"][category]
+        click.echo(f"{category}: {'enabled' if state else 'disabled'}; {log.path}")
+
+    return toggle
+
+
+for _category in ("terminal", "infrastructure", "flags"):
+    _logging_switch(_category)
+
+
 @ad.command("init")
 @project_option
 @click.option("--tick-seconds", default=120, type=int, show_default=True)
@@ -260,11 +293,17 @@ def tick_advance(ctx, project_name):
 @project_option
 @team_option
 @click.option("--flag", required=True)
+@click.option("--username", default=None, help="Player name for audit (operator supplied).")
 @click.pass_context
-def submit(ctx, project_name, team_name, flag):
+def submit(ctx, project_name, team_name, flag, username):
     app = ctx.parent.obj["ctf_app"]
     project = _project(app, project_name)
-    result = app.ad.submit(project, _team_enrollment(app, project, team_name), flag, source="cli")
+    try:
+        enrollment = _team_enrollment(app, project, team_name)
+    except Exception as exc:
+        app.audit.submission(project, None, flag, "UNAUTHORIZED_TEAM", user=username, source="cli")
+        raise click.ClickException(str(exc) or type(exc).__name__) from exc
+    result = app.ad.submit(project, enrollment, flag, source="cli", user=username)
     click.echo(result.code)
     if not result.accepted:
         ctx.exit(1)

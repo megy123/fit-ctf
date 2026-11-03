@@ -309,15 +309,28 @@ class ProjectManager(BaseManager[Project]):
         """
         prj = self.get_project(project_or_name)
 
+        from fit_ctf.ad.audit import AuditLog, file_lock
+
+        audit = AuditLog(self.paths.project_path(prj) / "logs")
+        if audit.control.exists():
+            audit.disable_all()
+
+            # The collector releases its lock after all child processes stop.
+            def wait_for_collector():
+                with file_lock(audit.root / ".collector.lock"):
+                    pass
+
+            import asyncio
+
+            await asyncio.to_thread(wait_for_collector)
+
         topology = self._db["ad_topology"].find_one({"project_id": prj.id})
         if topology and topology.get("plan"):
             compose = self.paths.project_path(prj) / "topology" / "compose.yaml"
             code, _ = await self.c_client.compose_down(prj.name, [compose])
             if code:
                 raise RuntimeError("Cannot disable project: stopping its A&D topology failed")
-            self._db["ad_topology"].update_one(
-                {"project_id": prj.id}, {"$set": {"running": False}}
-            )
+            self._db["ad_topology"].update_one({"project_id": prj.id}, {"$set": {"running": False}})
 
         # Stop project cluster if exists
         try:

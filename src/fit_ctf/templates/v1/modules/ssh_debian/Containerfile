@@ -3,7 +3,7 @@ FROM docker.io/library/debian:13
 
 # install sshd and ssh
 RUN apt-get update -y \
-    && apt-get install openssh-server openssh-client -y \
+    && apt-get install openssh-server openssh-client python3 -y \
     && /usr/bin/ssh-keygen -A
 
 # config sshd

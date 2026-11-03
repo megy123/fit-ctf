@@ -4,11 +4,10 @@ import pathlib
 import shutil
 from typing import TYPE_CHECKING, Any, cast, overload
 
-from typing_extensions import Self
-
 from bson import DBRef, ObjectId
 from pymongo.collection import Collection
 from pymongo.database import Database
+from typing_extensions import Self
 
 import fit_ctf.models.core.enrollment as enroll
 from fit_ctf.components.container_client.container_client_interface import (
@@ -255,13 +254,17 @@ class UserClusterManager(ClusterManagerMixin[UserCluster]):
         return {
             "shared": f"{project.name}_shared_net",
             "private": f"{project.name}_{user.username}_private_net",
+            "mode": "classic",
         }
 
     def is_ad_isolated(self, project: "project.Project") -> bool:
         """Return whether this project uses the isolated A&D topology."""
-        return self._db["ad_project_config"].find_one(
-            {"project_id": project.id, "active": True}, {"_id": 1}
-        ) is not None
+        return (
+            self._db["ad_project_config"].find_one(
+                {"project_id": project.id, "active": True}, {"_id": 1}
+            )
+            is not None
+        )
 
     def _scenario_global_and_destination(
         self, cluster: UserCluster, scenario_name: str
@@ -299,7 +302,19 @@ class UserClusterManager(ClusterManagerMixin[UserCluster]):
             "username": user.username,
             "container_port": enrollment.container_port,
             "forwarded_port": enrollment.forwarded_port,
+            "audit_socket_dir": "",
+            "audit_session_script": "",
+            "audit_control_dir": "",
         }
+        if self.is_ad_isolated(project):
+            from fit_ctf.ad.audit import AuditLog
+
+            log = AuditLog(self.paths.project_logs(project))
+            extras["audit_socket_dir"] = str(log.terminal_directory(user.username).resolve())
+            extras["audit_control_dir"] = str(log.control.parent.resolve())
+            extras["audit_session_script"] = str(
+                (pathlib.Path(__file__).parents[2] / "templates/v1/audit_session.py").resolve()
+            )
         # Add login_node_module with default value for login_node scenario
         if "login_node" in cluster.scenario_configs:
             login_node_cfg = cluster.scenario_configs["login_node"]

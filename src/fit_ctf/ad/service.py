@@ -397,6 +397,33 @@ class AttackDefenseService:
         return advanced
 
     def submit(
+        self, project, attacker, value, *, user=None, source="api", **kwargs
+    ) -> SubmissionResult:
+        try:
+            result = self._submit(project, attacker, value, source=source, **kwargs)
+        except Exception:
+            self.app.audit.submission(
+                project,
+                attacker,
+                value,
+                "REQUEST_FAILED",
+                user=user,
+                source=source,
+                source_ip=kwargs.get("source_ip"),
+            )
+            raise
+        self.app.audit.submission(
+            project,
+            attacker,
+            value,
+            result.code,
+            user=user,
+            source=source,
+            source_ip=kwargs.get("source_ip"),
+        )
+        return result
+
+    def _submit(
         self,
         project: "Project",
         attacker: "TeamEnrollment",

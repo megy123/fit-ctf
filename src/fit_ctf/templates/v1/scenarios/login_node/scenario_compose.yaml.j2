@@ -25,10 +25,17 @@ services:
     ports:
       - "{{ container_port }}:22"
     labels:
+      fit_ctf.project: "{{ project_name }}"
+      fit_ctf.user: "{{ username }}"
       fit_ctf.ssh.container_port: "{{ container_port }}"
       fit_ctf.ssh.forwarded_port: "{{ forwarded_port }}"
     environment: {}
     volumes:
+      {% if audit_socket_dir %}
+      - "{{ audit_socket_dir }}:/run/fitctf-audit:ro"
+      - "{{ audit_control_dir }}:/run/fitctf-audit-control:ro"
+      - "{{ audit_session_script }}:/run/fitctf-audit-session.py:ro"
+      {% endif %}
       - "{{ login_node__volume_map__home }}:/home/user"
       - "{{ login_node__volume_map__shadow }}:/etc/shadow"
 

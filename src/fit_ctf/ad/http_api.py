@@ -18,6 +18,24 @@ def create_http_server(app, host: str, port: int) -> ThreadingHTTPServer:
         server_version = "fit-ctf-ad/1"
 
         def _json(self, status: HTTPStatus, payload: dict | list) -> None:
+            context = getattr(self, "_audit_context", None)
+            if context and not getattr(self, "_audit_recorded", False):
+                try:
+                    project = app.prj_mgr.get_project(context["project"])
+                except Exception:
+                    project = None
+                if project:
+                    values = context.get("values", [None])
+                    for value in values:
+                        app.audit.submission(
+                            project,
+                            context.get("enrollment"),
+                            value,
+                            payload.get("code", "REQUEST_FAILED"),
+                            user=context.get("user"),
+                            source_ip=self.client_address[0],
+                        )
+                self._audit_recorded = True
             body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
@@ -64,9 +82,12 @@ def create_http_server(app, host: str, port: int) -> ThreadingHTTPServer:
 
         def do_POST(self):  # noqa: N802
             project_name, action = self._route()
+            self._audit_context = None
+            self._audit_recorded = False
             if not project_name or action not in {"submissions", "submissions/batch"}:
                 self._json(HTTPStatus.NOT_FOUND, {"code": "NOT_FOUND"})
                 return
+            self._audit_context = {"project": project_name}
             raw_length = self.headers.get("Content-Length", "0")
             try:
                 length = int(raw_length)
@@ -83,6 +104,14 @@ def create_http_server(app, host: str, port: int) -> ThreadingHTTPServer:
             except (UnicodeDecodeError, json.JSONDecodeError):
                 self._json(HTTPStatus.BAD_REQUEST, {"code": "INVALID_JSON"})
                 return
+            if not isinstance(payload, dict):
+                self._json(HTTPStatus.BAD_REQUEST, {"code": "INVALID_BODY"})
+                return
+            values = payload.get("flags", [payload.get("flag")])
+            self._audit_context.update(
+                values=values if isinstance(values, list) and len(values) <= 100 else [values],
+                user=payload.get("user") if isinstance(payload.get("user"), str) else None,
+            )
             authorization = self.headers.get("Authorization", "")
             if not authorization.startswith("Bearer "):
                 self._json(HTTPStatus.UNAUTHORIZED, {"code": "UNAUTHORIZED"})
@@ -95,6 +124,7 @@ def create_http_server(app, host: str, port: int) -> ThreadingHTTPServer:
                 if not enrollment:
                     self._json(HTTPStatus.UNAUTHORIZED, {"code": "UNAUTHORIZED"})
                     return
+                self._audit_context["enrollment"] = enrollment
                 values = payload.get("flags")
                 if values is None:
                     values = [payload.get("flag", "")]
@@ -105,11 +135,13 @@ def create_http_server(app, host: str, port: int) -> ThreadingHTTPServer:
                     self._json(HTTPStatus.BAD_REQUEST, {"code": "INVALID_BATCH"})
                     return
                 base_request_id = str(payload.get("request_id", ""))
+                self._audit_recorded = True
                 results = [
                     app.ad.submit(
                         project,
                         enrollment,
                         str(value),
+                        user=self._audit_context.get("user"),
                         source_ip=self.client_address[0],
                         request_id=(
                             f"{base_request_id}:{index}"

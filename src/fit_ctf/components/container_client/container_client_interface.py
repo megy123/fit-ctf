@@ -43,9 +43,15 @@ class ContainerClientInterface(ABC):
         if proc.stdout:
             async for line in proc.stdout:
                 message = line.decode().strip()
+                self.ctf_base.audit.infrastructure(logger_name, message, event="engine_output")
                 self.ctf_base.logger.info(message, logger_name=logger_name)
                 if to_stdout:
                     self.ctf_base.logger.print(message)
+        await proc.wait()
+        if proc.returncode:
+            self.ctf_base.audit.infrastructure(
+                logger_name, f"Container command failed (exit {proc.returncode})", event="error"
+            )
 
     def _run_logged_sync(self, cmd: list[str], logger_name: str, *, to_stdout: bool = False) -> int:
         proc = subprocess.run(
@@ -56,10 +62,15 @@ class ContainerClientInterface(ABC):
         )
         out = proc.stdout or ""
         for line in out.splitlines():
+            self.ctf_base.audit.infrastructure(logger_name, line, event="engine_output")
             self.ctf_base.logger.info(line, logger_name=logger_name)
             if to_stdout:
                 self.ctf_base.logger.print(line)
         rc = proc.returncode
+        if rc:
+            self.ctf_base.audit.infrastructure(
+                logger_name, f"Container command failed (exit {rc})", event="error"
+            )
         return rc if rc is not None else 255
 
     @abstractmethod

@@ -3,7 +3,7 @@ FROM registry.access.redhat.com/ubi9:latest
 
 # install sshd and ssh
 RUN dnf update -y \
-    && dnf install openssh-server openssh-clients -y \
+    && dnf install openssh-server openssh-clients python3 -y \
     && /usr/bin/ssh-keygen -A
 
 # config sshd

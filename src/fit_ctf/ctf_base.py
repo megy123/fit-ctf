@@ -298,3 +298,11 @@ class CTFBase:
         if not hasattr(self, "_topology"):
             self._topology = TopologyManager(self)
         return self._topology
+
+    @property
+    def audit(self):
+        from fit_ctf.ad.audit import AuditManager
+
+        if not hasattr(self, "_audit"):
+            self._audit = AuditManager(self)
+        return self._audit
