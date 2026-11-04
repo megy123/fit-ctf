@@ -64,6 +64,7 @@ class FlagRuntimeMixin:
         config.revision += 1
         self.managers.config.update_doc(config)
         self.sync_instances(project)
+        self.configure_scoreboard(project, catalogue.scoreboard)
         return catalogue
 
     def checker_for(self, project, instance, tick_number):
@@ -126,6 +127,7 @@ class FlagRuntimeMixin:
             result = self.checker_for(project, instance, tick_number).call(operation, expected)
         except Exception as exc:
             result = {"status": "checker_error", "code": type(exc).__name__}
+        self.record_service_health(project, instance, tick_number, result["status"], result["code"])
         return result["status"], result["code"], int((time.monotonic() - started) * 1000)
 
     def unavailable_team_service(self, project, attacker, tick):

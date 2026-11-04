@@ -12,6 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from fit_ctf.ad.scoreboard_config import ScoreboardSettings
+
 
 class StrictConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -52,6 +54,7 @@ class FlagCatalogue(StrictConfig):
     version: Literal[2]
     ticks: TickSettings
     flags: dict[str, FlagSettings] = Field(min_length=1)
+    scoreboard: ScoreboardSettings = Field(default_factory=ScoreboardSettings)
 
     @model_validator(mode="after")
     def validate_schedule(self):

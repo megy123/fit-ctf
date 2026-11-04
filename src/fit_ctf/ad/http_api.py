@@ -63,6 +63,21 @@ def create_http_server(app, host: str, port: int) -> ThreadingHTTPServer:
                 if action == "scoreboard":
                     self._json(HTTPStatus.OK, app.ad.scoreboard(project))
                     return
+                if action == "scoreboard-state":
+                    self._json(HTTPStatus.OK, app.ad.scoreboard_state(project))
+                    return
+                if action == "scoreboard.html" and config.scoreboard_html_enabled:
+                    from fit_ctf.ad.scoreboard_html import render_scoreboard_html
+
+                    body = render_scoreboard_html(app.ad.scoreboard_state(project)).encode("utf-8")
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 if action == "status":
                     tick = app.ad.managers.ticks.latest(project.id)
                     self._json(

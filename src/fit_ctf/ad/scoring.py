@@ -3,6 +3,7 @@
 import hashlib
 import json
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 
 
 @dataclass(frozen=True)
@@ -13,11 +14,23 @@ class TeamTickScore:
     input_digest: str
 
 
-class AdditiveAttackDefenseScoringPolicy:
+def weighted_components(config, attack, defense, sla):
+    """Return weighted milli-points, rounded once per cumulative component."""
+    return tuple(
+        int(
+            (Decimal(value) * Decimal(str(coefficient))).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+        for value, coefficient in zip((attack, defense, sla), (config.ma, config.mb, config.mc))
+    )
+
+
+class WeightedAttackDefenseScoringPolicy:
     """Default full A&D policy; it performs no persistence or runtime I/O."""
 
-    name = "additive_v1"
-    version = 1
+    name = "weighted_v2"
+    version = 2
 
     def compute_team(
         self,
@@ -28,6 +41,7 @@ class AdditiveAttackDefenseScoringPolicy:
         checks,
         definitions,
         instance_definition_ids,
+        expected_instance_ids,
     ) -> TeamTickScore:
         own_submissions = [
             item for item in submissions if item.attacker_team_enrollment_id == team_enrollment_id
@@ -48,18 +62,21 @@ class AdditiveAttackDefenseScoringPolicy:
             for item in own_checks
             if item.status == "up"
         )
-        scoreable_checks = [item for item in own_checks if item.status != "checker_error"]
+        # A tick earns SLA only when every scheduled own flag was retrieved correctly.
+        # Missing checks, checker exceptions and timeouts cannot earn availability points.
+        retrieved = {c.service_instance_id for c in own_checks if c.flag_ok is True}
         sla = (
             config.sla_points_milli
-            * sum(1 for item in scoreable_checks if item.status == "up")
-            // len(scoreable_checks)
-            if scoreable_checks
+            if expected_instance_ids
+            and (retrieved == expected_instance_ids and all(c.flag_ok is True for c in own_checks))
             else 0
         )
         canonical_input = {
             "policy": [self.name, self.version],
+            "coefficients": [config.ma, config.mb, config.mc],
             "submissions": sorted(str(item.id) for item in own_submissions),
-            "checks": sorted((str(item.id), item.status) for item in own_checks),
+            "checks": sorted((str(item.id), item.status, item.flag_ok) for item in own_checks),
+            "expected_instances": sorted(str(i) for i in expected_instance_ids),
         }
         digest = hashlib.sha256(
             json.dumps(canonical_input, separators=(",", ":")).encode("utf-8")

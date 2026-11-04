@@ -22,6 +22,7 @@ from fit_ctf_rendezvous.widgets import (
 from fit_ctf_rendezvous.widgets.content_pages.change_password_page import (
     ChangePasswordPage,
 )
+from fit_ctf_rendezvous.widgets.content_pages.scoreboard_page import ScoreboardPage
 
 
 class AppScreen(BaseScreen):
@@ -32,7 +33,9 @@ class AppScreen(BaseScreen):
     ) -> None:
         super().__init__(base_app, **kwargs)
         self.on_exit = on_exit
-        self.page_state = "home"
+        self.page_state = (
+            "scoreboard" if self.core_mgr.is_ad_project(self.core_mgr.selected_project) else "home"
+        )
         self._build_sidebar_and_pages()
         self.curr_content_widget = self.pages[self.page_state]
 
@@ -42,6 +45,7 @@ class AppScreen(BaseScreen):
         )
         self.pages = {
             "home": WelcomePage(self, id="welcome-page"),
+            "scoreboard": ScoreboardPage(self, id="scoreboard-page"),
             "select-project": ProjectSelector(
                 self,
                 id="project-selector",

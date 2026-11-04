@@ -39,11 +39,18 @@ class ADProjectConfig(Base):
     attack_points_milli: int = 10_000
     defense_points_milli: int = 5_000
     sla_points_milli: int = 5_000
+    ma: float = Field(default=1, ge=0, allow_inf_nan=False)
+    mb: float = Field(default=1, ge=0, allow_inf_nan=False)
+    mc: float = Field(default=1, ge=0, allow_inf_nan=False)
+    scoreboard_html_enabled: bool = False
+    scoreboard_refresh_seconds: int = Field(default=2, ge=1, le=60)
+    service_health_interval_seconds: int = Field(default=5, ge=1, le=300)
+    service_health_checked_at: datetime | None = None
     start_time: datetime | None = None
     end_time: datetime | None = None
     revision: int = 1
-    scoring_policy: str = "additive_v1"
-    scoring_policy_version: int = 1
+    scoring_policy: str = "weighted_v2"
+    scoring_policy_version: int = 2
     submit_rate_per_second: float = 10.0
     submit_burst: int = 30
     submit_batch_size: int = 50

@@ -24,6 +24,9 @@ class RendezvousApp(App):
         from fit_ctf_rendezvous.user_rendezvous_settings import apply_to_app, load
 
         apply_to_app(self, load(self.core_mgr.ctf_base.paths, user))
+        projects = self.core_mgr.get_active_projects()
+        if len(projects) == 1 and self.core_mgr.is_ad_project(projects[0]):
+            self.core_mgr.selected_project = projects[0]
         self.pop_screen()
         self.push_screen(AppScreen(self, self.on_logout))
 

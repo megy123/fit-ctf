@@ -177,10 +177,13 @@ class ADCheckResultManager(BaseManager[ADServiceCheckResult]):
 
 
 class ADScoreSnapshotManager(BaseManager[ADScoreSnapshot]):
-    def latest_for_project(self, project_id: ObjectId) -> list[ADScoreSnapshot]:
-        latest = self.collection.find_one(
-            {"project_id": project_id, "active": True}, sort=[("tick_number", DESCENDING)]
-        )
+    def latest_for_project(
+        self, project_id: ObjectId, *, before_tick: int | None = None
+    ) -> list[ADScoreSnapshot]:
+        query = {"project_id": project_id, "active": True}
+        if before_tick is not None:
+            query["tick_number"] = {"$lt": before_tick}
+        latest = self.collection.find_one(query, sort=[("tick_number", DESCENDING)])
         if not latest:
             return []
         return self.get_docs(project_id=project_id, tick_number=latest["tick_number"], active=True)
@@ -199,6 +202,9 @@ class ADManagers:
 
 
 def ensure_ad_indexes(db) -> None:
+    db["ad_service_health"].create_index(
+        [("project_id", ASCENDING), ("service_instance_id", ASCENDING)], unique=True
+    )
     db["team"].create_index("name", unique=True)
     db["team_enrollment"].create_index(
         [("project_id.$id", ASCENDING), ("team_id.$id", ASCENDING)], unique=True
@@ -254,6 +260,7 @@ def ensure_ad_indexes(db) -> None:
         ],
         unique=True,
     )
+    db["ad_score_snapshot"].create_index([("project_id", ASCENDING), ("tick_number", DESCENDING)])
     db["ad_score_snapshot"].create_index(
         [
             ("project_id", ASCENDING),

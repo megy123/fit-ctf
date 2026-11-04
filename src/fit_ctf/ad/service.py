@@ -14,7 +14,8 @@ from pymongo.errors import DuplicateKeyError
 from fit_ctf.ad.crypto import FlagCrypto
 from fit_ctf.ad.flag_runtime import FlagRuntimeMixin
 from fit_ctf.ad.ports import FullAttackDefensePolicy
-from fit_ctf.ad.scoring import AdditiveAttackDefenseScoringPolicy
+from fit_ctf.ad.scoreboard import ScoreboardMixin
+from fit_ctf.ad.scoring import WeightedAttackDefenseScoringPolicy, weighted_components
 from fit_ctf.components.data_parser.yaml_parser import YamlParser
 from fit_ctf.models.ad.managers import ADConfigError, ADManagers
 from fit_ctf.models.ad.models import ADScoreSnapshot, ADTick
@@ -56,7 +57,7 @@ class TokenBucket:
             return True
 
 
-class AttackDefenseService(FlagRuntimeMixin):
+class AttackDefenseService(FlagRuntimeMixin, ScoreboardMixin):
     """Project-scoped full Attack & Defense orchestration.
 
     Mode behavior is behind a policy object so attack-only and defense-only can be
@@ -67,7 +68,7 @@ class AttackDefenseService(FlagRuntimeMixin):
         self.app = app
         self.managers = managers
         self.policy = FullAttackDefensePolicy()
-        self.scoring_policy = AdditiveAttackDefenseScoringPolicy()
+        self.scoring_policy = WeightedAttackDefenseScoringPolicy()
         self.crypto = FlagCrypto(flag_secret)
         self.team_rate_limiter = TokenBucket(rate=10, burst=30)
         self.ip_rate_limiter = TokenBucket(rate=25, burst=60)
@@ -250,6 +251,10 @@ class AttackDefenseService(FlagRuntimeMixin):
         if self.managers.ticks.active_tick(project.id):
             raise ADConfigError("The project already has an active tick.")
         instances = self.sync_instances(project)
+        if config.scoring_policy_version != self.scoring_policy.version:
+            config.scoring_policy = self.scoring_policy.name
+            config.scoring_policy_version = self.scoring_policy.version
+            self.managers.config.update_doc(config)
         latest = self.managers.ticks.latest(project.id)
         number = 0 if latest is None else latest.number + 1
         if config.tick_count is not None and number >= config.tick_count:
@@ -416,12 +421,15 @@ class AttackDefenseService(FlagRuntimeMixin):
                 active = self.managers.ticks.active_tick(project.id)
                 if active is None:
                     advanced.append(self.open_tick(project, now=now))
-                    continue
-                boundary = (
-                    active.active_at or active.started_at or active.scheduled_at
-                ) + timedelta(seconds=config.tick_seconds)
-                if now >= boundary:
-                    advanced.append(self.advance(project, now=now))
+                else:
+                    boundary = (
+                        active.active_at or active.started_at or active.scheduled_at
+                    ) + timedelta(seconds=config.tick_seconds)
+                    if now >= boundary:
+                        advanced.append(self.advance(project, now=now))
+                self.refresh_service_health(project, now=now)
+                if self._config(project).scoreboard_html_enabled:
+                    self.write_scoreboard_html(project)
             finally:
                 self.managers.config.release_scheduler_lease(config.id, self.worker_id)
         return advanced
@@ -530,7 +538,9 @@ class AttackDefenseService(FlagRuntimeMixin):
                 flag_id=flag.id,
                 service_instance_id=flag.service_instance_id,
                 victim_team_enrollment_id=flag.owner_team_enrollment_id,
-                tick_number=flag.tick_number,
+                # Award an accepted flag in the submission tick. A valid older
+                # flag must not be lost in an already finalized score snapshot.
+                tick_number=tick.number,
                 source=source,
                 request_id=request_id or str(uuid.uuid4()),
             )
@@ -557,7 +567,7 @@ class AttackDefenseService(FlagRuntimeMixin):
         return SubmissionResult(
             True,
             "ACCEPTED",
-            tick=flag.tick_number,
+            tick=tick.number,
             service=definition.key if definition else None,
         )
 
@@ -574,14 +584,11 @@ class AttackDefenseService(FlagRuntimeMixin):
             item.id: item
             for item in self.managers.definitions.get_docs(project_id=project.id, active=True)
         }
-        instance_definition_ids = {
-            item.id: item.service_definition_id
-            for item in self.managers.instances.get_docs(project_id=project.id, active=True)
-        }
+        instances = self.managers.instances.get_docs(project_id=project.id, active=True)
+        instance_definition_ids = {item.id: item.service_definition_id for item in instances}
         previous = {
             snap.team_enrollment_id: snap
-            for snap in self.managers.scores.latest_for_project(project.id)
-            if snap.tick_number < tick.number
+            for snap in self.managers.scores.latest_for_project(project.id, before_tick=tick.number)
         }
         created: list[ADScoreSnapshot] = []
         for enrollment in enrollments:
@@ -592,6 +599,16 @@ class AttackDefenseService(FlagRuntimeMixin):
                 checks=checks,
                 definitions=definitions,
                 instance_definition_ids=instance_definition_ids,
+                expected_instance_ids={
+                    instance.id
+                    for instance in instances
+                    if instance.team_enrollment_id == enrollment.id
+                    and definitions[instance.service_definition_id].enabled
+                    and (
+                        definitions[instance.service_definition_id].flag_ticks is None
+                        or tick.number in definitions[instance.service_definition_id].flag_ticks
+                    )
+                },
             )
             prev = previous.get(enrollment.id)
             attack_total = delta.attack_milli + (prev.attack_total_milli if prev else 0)
@@ -609,7 +626,9 @@ class AttackDefenseService(FlagRuntimeMixin):
                 attack_total_milli=attack_total,
                 defense_total_milli=defense_total,
                 sla_total_milli=sla_total,
-                total_milli=attack_total + defense_total + sla_total,
+                total_milli=sum(
+                    weighted_components(config, attack_total, defense_total, sla_total)
+                ),
                 input_digest=delta.input_digest,
             )
             existing = self.managers.scores.get_doc_by_filter(
@@ -629,24 +648,3 @@ class AttackDefenseService(FlagRuntimeMixin):
             snapshot.rank = rank
             self.managers.scores.update_doc(snapshot)
         return ranked
-
-    def scoreboard(self, project: "Project") -> list[dict]:
-        snapshots = sorted(
-            self.managers.scores.latest_for_project(project.id), key=lambda item: item.rank
-        )
-        result = []
-        for snapshot in snapshots:
-            enrollment = self.app.team_enroll_mgr.get_doc_by_id(snapshot.team_enrollment_id)
-            team = self.app.team_mgr.get_doc_by_id(enrollment.team_id.id) if enrollment else None
-            result.append(
-                {
-                    "rank": snapshot.rank,
-                    "team": team.display_name if team else "<missing>",
-                    "tick": snapshot.tick_number,
-                    "attack": snapshot.attack_total_milli / 1000,
-                    "defense": snapshot.defense_total_milli / 1000,
-                    "sla": snapshot.sla_total_milli / 1000,
-                    "total": snapshot.total_milli / 1000,
-                }
-            )
-        return result

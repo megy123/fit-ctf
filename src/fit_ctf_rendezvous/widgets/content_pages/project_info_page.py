@@ -14,9 +14,11 @@ from textual.widgets import (
 )
 from textual.worker import Worker, WorkerState
 
+from fit_ctf.components.exceptions import CTFBaseException
 from fit_ctf_rendezvous.exceptions import FitRendezvousException, InconsistentState
 from fit_ctf_rendezvous.i18n import jinja_resources_loader, tr
 from fit_ctf_rendezvous.screens.base_screen import BaseScreen
+from fit_ctf_rendezvous.widgets.content_pages.scoreboard_page import ScoreboardPage
 from fit_ctf_rendezvous.widgets.core_widget import CoreWidget
 
 
@@ -87,8 +89,11 @@ class ProjectInfoPage(Container, CoreWidget):
                         id="project-description-md",
                     )
             with TabPane(tr("project_info.tab_leaderboard")):
-                with VerticalScroll():
-                    yield self.generate_leaderboard()
+                if self.core_mgr.is_ad_project(self.core_mgr.selected_project):
+                    yield ScoreboardPage(self.owner_screen)
+                else:
+                    with VerticalScroll():
+                        yield self.generate_leaderboard()
 
     def generate_leaderboard(self) -> DataTable:
         """Generate the leaderboard tab content"""
@@ -129,7 +134,7 @@ class ProjectInfoPage(Container, CoreWidget):
         template = env.get_template("run_cluster_instruction.md.j2")
         try:
             container_port, forwarded_port = self._get_ssh_ports()
-        except FitRendezvousException as e:
+        except (FitRendezvousException, CTFBaseException) as e:
             self.core_mgr.ctf_base.logger.error(str(e))
             return tr("project_info.ssh_error_supervisor")
         return template.render(

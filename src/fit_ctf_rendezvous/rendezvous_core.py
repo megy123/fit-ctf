@@ -137,7 +137,36 @@ class RendezvousCore(_VariableRegistry):
         """
         if not self.active_user:
             return []
-        return self.ctf_base.enroll_mgr.get_enrolled_projects(self.active_user.username)
+        projects = {
+            p.id: p
+            for p in self.ctf_base.enroll_mgr.get_enrolled_projects(self.active_user.username)
+        }
+        for enrollment in self.ctf_base.team_enroll_mgr.get_docs(
+            active=True, state="active", member_ids_snapshot=self.active_user.id
+        ):
+            project = self.ctf_base.prj_mgr.get_doc_by_id(enrollment.project_id.id)
+            if project and project.active and self.is_ad_project(project):
+                projects[project.id] = project
+        return list(projects.values())
+
+    def is_ad_project(self, project):
+        return (
+            project is not None
+            and self.ctf_base.ad.managers.config.get_doc_by_filter(
+                project_id=project.id, active=True
+            )
+            is not None
+        )
+
+    def get_ad_scoreboard(self):
+        if not self.active_user:
+            raise UserNotLoggedIn("Log in to view the scoreboard.")
+        project = self.selected_project
+        if not project or not self.is_ad_project(project):
+            raise InvalidAction("Select an Attack & Defense project to view its scoreboard.")
+        if project.id not in {p.id for p in self.get_active_projects()}:
+            raise InvalidAction("You are not enrolled in this project.")
+        return self.ctf_base.ad.scoreboard_state(project)
 
     def submit_secret(self, value: str, project_name: str) -> None:
         """Wrapper function for submitting project secrets.

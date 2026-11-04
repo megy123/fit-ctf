@@ -332,17 +332,69 @@ def submit(ctx, project_name, team_name, flag, username):
 
 @ad.command("scoreboard")
 @project_option
+@click.option("--watch", is_flag=True, help="Refresh scores, tick timers and service health live.")
 @click.pass_context
-def scoreboard(ctx, project_name):
+def scoreboard(ctx, project_name, watch):
+    from rich.console import Console
+    from rich.live import Live
+
+    from fit_ctf.ad.scoreboard_terminal import scoreboard_renderable
+
     app = ctx.parent.obj["ctf_app"]
-    rows = app.ad.scoreboard(_project(app, project_name))
-    values = [
-        [row[key] for key in ("rank", "team", "tick", "attack", "defense", "sla", "total")]
-        for row in rows
-    ]
-    get_view("tabulate").print_data(
-        ["Rank", "Team", "Tick", "Attack", "Defense", "SLA", "Total"], values
+    project = _project(app, project_name)
+    console = Console()
+    if not watch:
+        console.print(scoreboard_renderable(app.ad.scoreboard_state(project)))
+        return
+    try:
+        with Live(console=console, refresh_per_second=1, screen=True) as live:
+            while True:
+                live.update(scoreboard_renderable(app.ad.scoreboard_state(project)))
+                time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+
+
+@ad.command("scoreboard-config")
+@project_option
+@click.option("--ma", type=click.FloatRange(min=0), default=None)
+@click.option("--mb", type=click.FloatRange(min=0), default=None)
+@click.option("--mc", type=click.FloatRange(min=0), default=None)
+@click.option("--html/--no-html", default=None)
+@click.option("--refresh-seconds", type=click.IntRange(1, 60), default=None)
+@click.option("--service-check-seconds", type=click.IntRange(1, 300), default=None)
+@click.pass_context
+def scoreboard_config(ctx, project_name, ma, mb, mc, html, refresh_seconds, service_check_seconds):
+    """Configure scoring before the start; the optional HTML view can be toggled anytime."""
+    from fit_ctf.ad.scoreboard_config import Coefficients, ScoreboardSettings
+
+    app = ctx.find_object(dict)["ctf_app"]
+    project = _project(app, project_name)
+    config = app.ad._config(project)
+    try:
+        path = app.ad.configure_scoreboard(
+            project,
+            ScoreboardSettings(
+                coefficients=Coefficients(
+                    ma=config.ma if ma is None else ma,
+                    mb=config.mb if mb is None else mb,
+                    mc=config.mc if mc is None else mc,
+                ),
+                html=config.scoreboard_html_enabled if html is None else html,
+                refresh_seconds=refresh_seconds or config.scoreboard_refresh_seconds,
+                service_check_seconds=service_check_seconds
+                or config.service_health_interval_seconds,
+            ),
+        )
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+    config = app.ad._config(project)
+    click.echo(
+        f"Ma={config.ma} Mb={config.mb} Mc={config.mc}; HTML={config.scoreboard_html_enabled}"
     )
+    if path:
+        click.echo(f"HTML snapshot: {path}")
+        click.echo(f"Live page: /api/v1/projects/{project.name}/ad/scoreboard.html (ad serve)")
 
 
 @ad.command("status")

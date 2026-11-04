@@ -43,3 +43,5 @@ class ProjectSelector(Container, CoreWidget):
             self.owner_screen.core_mgr.selected_project = (
                 self.core_mgr.ctf_base.prj_mgr.get_project(cmd)
             )
+            if self.core_mgr.is_ad_project(self.core_mgr.selected_project):
+                self.owner_screen.page_selector_handler("scoreboard")

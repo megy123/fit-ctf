@@ -54,6 +54,12 @@ class AppSideBar(Container, CoreWidget):
                 tr("sidebar.submit_secret"),
                 id="sidebar-submit-secret-btn",
             )
+            yield Button(
+                "A&D Scoreboard",
+                id="sidebar-scoreboard-btn",
+                disabled=self.selected_project is None,
+                classes="sidebar-active-btn",
+            )
             yield Rule(line_style="ascii")
             yield Button(
                 tr("sidebar.project_info"),
@@ -74,6 +80,7 @@ class AppSideBar(Container, CoreWidget):
         yield Button(tr("sidebar.logout"), variant="error", id="sidebar-logout-btn")
 
     def on_mount(self) -> None:
+        self.selected_project_hook(self.core_mgr.selected_project)
         self.set_interval(3, self.update_instance_status)
 
     def on_unmount(self) -> None:
