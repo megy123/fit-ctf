@@ -30,6 +30,8 @@ class ADProjectConfig(Base):
     network_topology: str = "isolated_router_v1"
     state: str = "draft"
     tick_seconds: int = 120
+    tick_count: int | None = None
+    checker_timeout_seconds: float = 10
     flag_ttl_ticks: int = 2
     checker_runs_per_tick: int = 1
     checker_concurrency: int = 8
@@ -61,6 +63,10 @@ class ADServiceDefinition(Base):
     supported_modes: list[str] = Field(default_factory=lambda: ["attack_defense"])
     owner_scope: str = "team"
     checker_adapter: str = "file"
+    checker_entrypoint: str | None = None
+    checker_params: dict = Field(default_factory=dict)
+    node_name: str = ""
+    flag_ticks: list[int] | None = None
     flag_adapter: str = "file"
     relative_flag_path: str = "runtime/flags/current.flag"
     scoring_weight_milli: int = 1000
@@ -72,7 +78,7 @@ class ADServiceInstance(Base):
     service_definition_id: ObjectId
     team_enrollment_id: ObjectId
     instance_key: str
-    flag_path: str
+    flag_path: str = ""
     scope: str = "team_owned"
     cluster_kind: str = "team"
     runtime_service_name: str = ""

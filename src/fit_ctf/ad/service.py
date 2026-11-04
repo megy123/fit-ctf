@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 
 from pymongo.errors import DuplicateKeyError
 
-from fit_ctf.ad.adapters import FileFlagPlantingAdapter, FileServiceChecker
 from fit_ctf.ad.crypto import FlagCrypto
+from fit_ctf.ad.flag_runtime import FlagRuntimeMixin
 from fit_ctf.ad.ports import FullAttackDefensePolicy
 from fit_ctf.ad.scoring import AdditiveAttackDefenseScoringPolicy
 from fit_ctf.components.data_parser.yaml_parser import YamlParser
@@ -56,7 +56,7 @@ class TokenBucket:
             return True
 
 
-class AttackDefenseService:
+class AttackDefenseService(FlagRuntimeMixin):
     """Project-scoped full Attack & Defense orchestration.
 
     Mode behavior is behind a policy object so attack-only and defense-only can be
@@ -69,15 +69,15 @@ class AttackDefenseService:
         self.policy = FullAttackDefensePolicy()
         self.scoring_policy = AdditiveAttackDefenseScoringPolicy()
         self.crypto = FlagCrypto(flag_secret)
-        self.planter = FileFlagPlantingAdapter()
-        self.checker = FileServiceChecker()
         self.team_rate_limiter = TokenBucket(rate=10, burst=30)
         self.ip_rate_limiter = TokenBucket(rate=25, burst=60)
         self.project_rate_limiter = TokenBucket(rate=100, burst=300)
         self.worker_id = str(uuid.uuid4())
 
-    def initialize_project(self, project: "Project", *, tick_seconds: int = 120):
-        config = self.managers.config.initialize(project.id, tick_seconds=tick_seconds)
+    def initialize_project(self, project: "Project", *, tick_seconds: int = 120, tick_count=None):
+        config = self.managers.config.initialize(
+            project.id, tick_seconds=tick_seconds, tick_count=tick_count
+        )
         # A&D owns its topology. The generic project cluster creates these
         # legacy networks before the A&D mode is selected; remove them so an
         # isolated competition has no shared project network.
@@ -117,18 +117,28 @@ class AttackDefenseService:
             raise ADConfigError("At least one A&D service definition is required.")
         if any("attack_defense" not in item.supported_modes for item in definitions):
             raise ADConfigError("Every enabled service must support attack_defense.")
-        self.sync_instances(project)
+        uncovered = self.uncovered_team_services(project, definitions)
+        if uncovered:
+            targets = ", ".join("/".join(target) for target in sorted(uncovered))
+            raise ADConfigError(f"Every team service needs a flag checker; missing: {targets}")
+        for instance in self.sync_instances(project):
+            result = self.checker_for(project, instance, 0).call("validate")
+            if result["status"] != "up":
+                raise ADConfigError(
+                    f"Invalid checker for {instance.instance_key}: {result['code']}"
+                )
         config.state = "ready"
         config.updated_at = utcnow()
         self.managers.config.update_doc(config)
         return config
 
-    def finish_project(self, project: "Project"):
+    def finish_project(self, project: "Project", *, now: datetime | None = None):
+        now = now or utcnow()
         config = self._config(project)
         if config.state == "running" and self.managers.ticks.active_tick(project.id):
-            self.close_tick(project)
+            self.close_tick(project, now=now)
         config.state = "finished"
-        config.end_time = utcnow()
+        config.end_time = now
         config.updated_at = utcnow()
         self.managers.config.update_doc(config)
         self.managers.flags.collection.update_many(
@@ -241,9 +251,24 @@ class AttackDefenseService:
             raise ADConfigError("The project already has an active tick.")
         instances = self.sync_instances(project)
         latest = self.managers.ticks.latest(project.id)
+        number = 0 if latest is None else latest.number + 1
+        if config.tick_count is not None and number >= config.tick_count:
+            raise ADConfigError("Configured tick count has been reached")
+        definitions = {
+            d.id: d
+            for d in self.managers.definitions.get_docs(
+                project_id=project.id, active=True, enabled=True
+            )
+        }
+        instances = [
+            i
+            for i in instances
+            if definitions[i.service_definition_id].flag_ticks is None
+            or number in definitions[i.service_definition_id].flag_ticks
+        ]
         tick = self.managers.ticks.create_and_insert_doc(
             project_id=project.id,
-            number=0 if latest is None else latest.number + 1,
+            number=number,
             state="planting",
             scheduled_at=now,
             started_at=now,
@@ -268,16 +293,14 @@ class AttackDefenseService:
                 valid_until=now + timedelta(seconds=config.tick_seconds * config.flag_ttl_ticks),
             )
             flag.planting_attempts += 1
-            planting_jobs.append((flag, Path(instance.flag_path), value))
+            planting_jobs.append((flag, instance, value))
 
         def plant_one(job):
-            flag, path, value = job
-            try:
-                self.planter.plant(path, value)
-                return flag, None
-            except Exception as exc:  # adapter boundary: persist a redacted failure type
-                return flag, type(exc).__name__
+            flag, instance, value = job
+            status, code, _ = self.probe_instance(project, instance, number, value, "plant")
+            return flag, None if status == "up" else code
 
+        results = []
         with ThreadPoolExecutor(max_workers=config.planting_concurrency) as executor:
             planting_results = executor.map(plant_one, planting_jobs)
             for flag, error in planting_results:
@@ -288,9 +311,15 @@ class AttackDefenseService:
                 else:
                     flag.state = "plant_failed"
                     flag.last_error = error
-                self.managers.flags.update_doc(flag)
+                results.append(flag)
         tick.state = "active"
-        tick.active_at = utcnow()
+        tick.active_at = max(now, utcnow())
+        for flag in results:
+            flag.valid_from = tick.active_at
+            flag.valid_until = tick.active_at + timedelta(
+                seconds=config.tick_seconds * config.flag_ttl_ticks
+            )
+            self.managers.flags.update_doc(flag)
         tick.planted_instance_count = planted
         self.managers.ticks.update_doc(tick)
         return tick
@@ -325,15 +354,12 @@ class AttackDefenseService:
             )
             if not existing:
                 expected = self.crypto.decrypt(flag.encrypted_value)
-                check_jobs.append((flag, instance, Path(instance.flag_path), expected))
+                check_jobs.append((flag, instance, expected))
             checked += 1
 
         def check_one(job):
-            flag, instance, path, expected = job
-            try:
-                status, code, latency = self.checker.check(path, expected)
-            except Exception as exc:  # checker bugs are neutral infrastructure failures
-                status, code, latency = "checker_error", type(exc).__name__, None
+            flag, instance, expected = job
+            status, code, latency = self.probe_instance(project, instance, tick.number, expected)
             return flag, instance, status, code, latency
 
         config = self._config(project)
@@ -359,13 +385,17 @@ class AttackDefenseService:
         tick.state = "closed"
         tick.closed_at = now
         self.managers.ticks.update_doc(tick)
+        if config.tick_count is not None and tick.number + 1 >= config.tick_count:
+            self.finish_project(project, now=now)
         return tick
 
     def advance(self, project: "Project", *, now: datetime | None = None) -> ADTick:
         now = now or utcnow()
         active = self.managers.ticks.active_tick(project.id)
         if active:
-            self.close_tick(project, now=now)
+            closed = self.close_tick(project, now=now)
+            if self._config(project).state == "finished":
+                return closed
         return self.open_tick(project, now=now)
 
     def run_due_projects(self, *, now: datetime | None = None) -> list[ADTick]:
@@ -440,6 +470,27 @@ class AttackDefenseService:
             return SubmissionResult(False, "UNAUTHORIZED_TEAM")
         if config.state != "running" or not self.policy.attack_enabled:
             return SubmissionResult(False, "PROJECT_NOT_RUNNING")
+        allowed = self.team_rate_limiter.allow(str(attacker.id))
+        allowed = self.project_rate_limiter.allow(str(project.id)) and allowed
+        if source_ip:
+            allowed = self.ip_rate_limiter.allow(source_ip) and allowed
+        if not allowed:
+            return SubmissionResult(False, "RATE_LIMITED")
+        if not request_id and (
+            len(value) > 256 or not value.startswith("FITCTF{") or not value.endswith("}")
+        ):
+            return SubmissionResult(False, "INVALID_FORMAT")
+        tick = self.managers.ticks.active_tick(project.id)
+        if not tick or tick.state != "active":
+            return SubmissionResult(False, "TICK_NOT_ACTIVE")
+        unavailable = self.unavailable_team_service(project, attacker, tick)
+        if unavailable:
+            return SubmissionResult(
+                False, "TEAM_SERVICE_UNAVAILABLE", tick=tick.number, service=unavailable
+            )
+        current_tick = self.managers.ticks.active_tick(project.id)
+        if not current_tick or current_tick.id != tick.id or current_tick.state != "active":
+            return SubmissionResult(False, "TICK_NOT_ACTIVE")
         if request_id:
             previous_request = self.managers.submissions.get_doc_by_filter(
                 project_id=project.id,
@@ -459,12 +510,6 @@ class AttackDefenseService:
                     previous_request.tick_number,
                     previous_definition.key if previous_definition else None,
                 )
-        allowed = self.team_rate_limiter.allow(str(attacker.id))
-        allowed = self.project_rate_limiter.allow(str(project.id)) and allowed
-        if source_ip:
-            allowed = self.ip_rate_limiter.allow(source_ip) and allowed
-        if not allowed:
-            return SubmissionResult(False, "RATE_LIMITED")
         if len(value) > 256 or not value.startswith("FITCTF{") or not value.endswith("}"):
             return SubmissionResult(False, "INVALID_FORMAT")
         digest = self.crypto.digest(value.strip())

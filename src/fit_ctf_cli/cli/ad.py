@@ -133,14 +133,35 @@ for _category in ("terminal", "infrastructure", "flags"):
 @ad.command("init")
 @project_option
 @click.option("--tick-seconds", default=120, type=int, show_default=True)
+@click.option("--tick-count", type=click.IntRange(min=1), default=None)
 @click.pass_context
-def init_ad(ctx, project_name, tick_seconds):
+def init_ad(ctx, project_name, tick_seconds, tick_count):
     app = ctx.parent.obj["ctf_app"]
     try:
-        config = app.ad.initialize_project(_project(app, project_name), tick_seconds=tick_seconds)
+        config = app.ad.initialize_project(
+            _project(app, project_name), tick_seconds=tick_seconds, tick_count=tick_count
+        )
     except Exception as exc:
         raise click.ClickException(str(exc) or type(exc).__name__) from exc
     click.echo(f"Attack & Defense initialized for `{project_name}` ({config.tick_seconds}s tick).")
+
+
+@ad.command("flags-load")
+@project_option
+@click.option("-f", "--file", required=True, type=click.Path(exists=True, path_type=Path))
+@click.pass_context
+def flags_load(ctx, project_name, file):
+    """Load tick schedule and author-provided checkers for every named flag."""
+
+    app = ctx.find_object(dict)["ctf_app"]
+    try:
+        catalogue = app.ad.configure_flags(_project(app, project_name), file)
+    except Exception as exc:
+        raise click.ClickException(str(exc) or type(exc).__name__) from exc
+    click.echo(
+        f"Loaded {len(catalogue.flags)} flag definitions; "
+        f"{catalogue.ticks.count} ticks of {catalogue.ticks.seconds}s."
+    )
 
 
 @ad.command("enroll-team")
@@ -277,7 +298,7 @@ def tick_open(ctx, project_name):
 def tick_close(ctx, project_name):
     app = ctx.parent.obj["ctf_app"]
     tick = app.ad.close_tick(_project(app, project_name))
-    click.echo(f"Tick {tick.number} closed; checked {tick.checked_instance_count} services.")
+    click.echo(f"Tick {tick.number} closed; checked {tick.checked_instance_count} flag locations.")
 
 
 @ad.command("tick-advance")

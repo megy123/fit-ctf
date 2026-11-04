@@ -26,9 +26,11 @@ class ADConfigError(Exception):
 
 
 class ADProjectConfigManager(BaseManager[ADProjectConfig]):
-    def initialize(self, project_id: ObjectId, *, tick_seconds: int = 120) -> ADProjectConfig:
-        if tick_seconds < 10:
-            raise ADConfigError("Tick duration must be at least 10 seconds.")
+    def initialize(
+        self, project_id: ObjectId, *, tick_seconds: int = 120, tick_count: int | None = None
+    ) -> ADProjectConfig:
+        if tick_seconds < 1 or (tick_count is not None and tick_count < 1):
+            raise ADConfigError("Tick duration and count must be positive.")
         if self.get_doc_by_filter(project_id=project_id, active=True):
             raise ADConfigError("Attack & Defense is already configured for this project.")
         return self.create_and_insert_doc(
@@ -36,6 +38,7 @@ class ADProjectConfigManager(BaseManager[ADProjectConfig]):
             mode=CompetitionMode.ATTACK_DEFENSE,
             network_topology="isolated_router_v1",
             tick_seconds=tick_seconds,
+            tick_count=tick_count,
         )
 
     def get_for_project(self, project_id: ObjectId) -> ADProjectConfig:
